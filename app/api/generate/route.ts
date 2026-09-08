@@ -14,7 +14,7 @@ export const maxDuration = 30;
 // The model string is the one thing you may want to change later. Any current
 // free Gemini Flash model works (e.g. "gemini-2.5-flash-lite" for lower latency,
 // or a newer flash id once you confirm it in Google AI Studio).
-const MODEL = "gemini-3.6-flash";
+const MODEL = "gemini-3.5-flash-lite";
 
 const TONE_GUIDE: Record<Tone, string> = {
   sincere: "earnest and self-aware, owning up to a real but relatable failing",
@@ -80,12 +80,12 @@ export async function POST(req: Request) {
       schema,
       temperature: 0.9,
       abortSignal: AbortSignal.timeout(18000),
-      maxRetries: 1,
+      maxRetries: 0,
       providerOptions: {
         google: {
           // Gemini 3.x Flash cannot fully disable thinking; "low" keeps
           // latency down for a task this small. (2.5 models use thinkingBudget.)
-          thinkingConfig: { thinkingLevel: "low" },
+          // thinkingConfig: { thinkingLevel: "low" },
         },
       },
       system:
