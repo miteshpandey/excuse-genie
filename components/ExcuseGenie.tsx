@@ -12,18 +12,29 @@ export default function ExcuseGenie() {
   const [selectedTone, setSelectedTone] = useState<Tone | null>(null);
   const [excuses, setExcuses] = useState<Excuse[]>([]);
   const [resultLabel, setResultLabel] = useState("");
+  const lastKey = useRef<string>("");
   const [copyStates, setCopyStates] = useState<Record<number, CopyState>>({});
 
   const typeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestId = useRef(0);
 
-    async function runGenerate(situation: string, tone: Tone | null) {
+  async function runGenerate(
+    situation: string,
+    tone: Tone | null,
+    force = false,
+  ) {
     if (!situation || !tone) {
       setExcuses([]);
       setResultLabel("");
       setLoading(false);
       return;
     }
+
+    // Don't re-fire on an identical selection (e.g. re-tapping the chip that's
+    // already active). "surprise me" passes force=true to always regenerate.
+    const key = `${situation}\u0000${tone}`;
+    if (!force && key === lastKey.current) return;
+    lastKey.current = key;
 
     const id = ++requestId.current;
     setLoading(true);
@@ -82,7 +93,7 @@ export default function ExcuseGenie() {
     setSelectedChip(s);
     setSelectedTone(t);
     setTypedText("");
-    runGenerate(s, t);
+    runGenerate(s, t, true);
   }
 
   async function copyLine(text: string, index: number) {
