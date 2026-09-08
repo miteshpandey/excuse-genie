@@ -7,6 +7,8 @@ three excuses, each with a short style label. Real results are cached in a Redis
 store, so when the model is unavailable (rate limit, timeout, outage) the app
 serves genuine past output for the same situation and tone instead of failing.
 
+<img width="537" height="785" alt="Screenshot 2026-09-09 at 1 19 20 AM" src="https://github.com/user-attachments/assets/680ed08c-fec9-414b-baf7-cc20a222e844" />
+
 ## Stack
 
 - Next.js (App Router) with TypeScript
