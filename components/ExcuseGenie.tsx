@@ -27,16 +27,14 @@ export default function ExcuseGenie() {
   const typeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestId = useRef(0);
 
-  async function runGenerate(
+    async function runGenerate(
     situation: string,
     tone: Tone | null,
     force = false,
   ) {
     if (!situation || !tone) {
-      currentPair.current = { situation, tone };
-      setCopyStates({});
-      setResultLabel(`${tone} \u00b7 ${situation}`);
-      setExcuses(data.excuses as ResultExcuse[]);
+      setExcuses([]);
+      setResultLabel("");
       setLoading(false);
       return;
     }
@@ -65,9 +63,10 @@ export default function ExcuseGenie() {
         setLoading(false);
         return;
       }
+      currentPair.current = { situation, tone };
       setCopyStates({});
       setResultLabel(`${tone} \u00b7 ${situation}`);
-      setExcuses(data.excuses as Excuse[]);
+      setExcuses(data.excuses as ResultExcuse[]);
       setLoading(false);
     } catch {
       if (id !== requestId.current) return;
