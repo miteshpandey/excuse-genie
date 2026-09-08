@@ -79,6 +79,13 @@ export async function POST(req: Request) {
       model: google(MODEL),
       schema,
       temperature: 0.9,
+      providerOptions: {
+        google: {
+          // Gemini 3.x Flash cannot fully disable thinking; "low" keeps
+          // latency down for a task this small. (2.5 models use thinkingBudget.)
+          thinkingConfig: { thinkingLevel: "low" },
+        },
+      },
       system:
         "You write short, believable, entertaining excuses for everyday social and work situations. " +
         "Given a situation and a tone, return exactly three distinct excuses. " +
