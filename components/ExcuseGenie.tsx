@@ -8,6 +8,7 @@ type CopyState = "copied" | "failed" | undefined;
 export default function ExcuseGenie() {
   const [selectedChip, setSelectedChip] = useState<string | null>(null);
   const [typedText, setTypedText] = useState("");
+  const [loading, setLoading] = useState(false);
   const [selectedTone, setSelectedTone] = useState<Tone | null>(null);
   const [excuses, setExcuses] = useState<Excuse[]>([]);
   const [resultLabel, setResultLabel] = useState("");
@@ -16,14 +17,16 @@ export default function ExcuseGenie() {
   const typeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestId = useRef(0);
 
-  async function runGenerate(situation: string, tone: Tone | null) {
+    async function runGenerate(situation: string, tone: Tone | null) {
     if (!situation || !tone) {
       setExcuses([]);
       setResultLabel("");
+      setLoading(false);
       return;
     }
 
     const id = ++requestId.current;
+    setLoading(true);
     try {
       const res = await fetch("/api/generate", {
         method: "POST",
@@ -31,20 +34,24 @@ export default function ExcuseGenie() {
         body: JSON.stringify({ situation, tone }),
       });
       const data = await res.json();
-      // Ignore responses that arrived after a newer request was fired.
+      // Ignore responses that arrived after a newer request was fired; the
+      // newer request owns the loading state, so don't touch it here.
       if (id !== requestId.current) return;
       if (!res.ok) {
         setExcuses([]);
         setResultLabel("");
+        setLoading(false);
         return;
       }
       setCopyStates({});
       setResultLabel(`${tone} \u00b7 ${situation}`);
       setExcuses(data.excuses as Excuse[]);
+      setLoading(false);
     } catch {
       if (id !== requestId.current) return;
       setExcuses([]);
       setResultLabel("");
+      setLoading(false);
     }
   }
 
@@ -223,7 +230,23 @@ export default function ExcuseGenie() {
             </span>
           </div>
 
-          {excuses.length === 0 ? (
+          {loading ? (
+            <div className="flex flex-col gap-6" aria-busy="true" aria-live="polite">
+              {[0, 1, 2].map((i) => (
+                <div
+                  key={i}
+                  className="flex animate-pulse items-start gap-4"
+                  style={{ animationDelay: `${i * 0.12}s` }}
+                >
+                  <div className="flex-1">
+                    <div className="mb-2 h-3 w-24 rounded bg-moss/30" />
+                    <div className="mb-1.5 h-4 w-full rounded bg-mist/30" />
+                    <div className="h-4 w-4/5 rounded bg-mist/30" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : excuses.length === 0 ? (
             <p className="text-lg font-light italic text-mist">
               Your excuse will appear here.
             </p>
