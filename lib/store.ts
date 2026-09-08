@@ -1,7 +1,6 @@
 import { Redis } from "@upstash/redis";
 import type { Tone } from "@/lib/excuses";
 
-// A single saved excuse for a (situation, tone) pair.
 export interface StoredExcuse {
   id: string;
   text: string;
@@ -10,9 +9,6 @@ export interface StoredExcuse {
   quality: boolean;
 }
 
-// Lazily construct the client so importing this module never requires the env
-// vars (keeps builds and the no-store fallback path working). The Upstash REST
-// client is HTTP-based and safe to use from serverless functions.
 let client: Redis | null = null;
 function redis(): Redis {
   if (!client) {
@@ -26,18 +22,22 @@ function redis(): Redis {
   return client;
 }
 
-// Normalize so "Missed a Wedding" and "missed a wedding" share one bucket.
+const RECENT_CAP = 200;
+
+function norm(situation: string): string {
+  return situation.trim().toLowerCase();
+}
 function keyFor(situation: string, tone: Tone): string {
-  const s = situation.trim().toLowerCase();
-  return `excuses:${s}::${tone}`;
+  return `excuses:${norm(situation)}::${tone}`;
+}
+function recentKeyFor(situation: string, tone: Tone): string {
+  return `recent:${norm(situation)}::${tone}`;
 }
 
-// @upstash/redis auto-serializes objects to JSON on set and parses on get.
 async function readAll(situation: string, tone: Tone): Promise<StoredExcuse[]> {
   const value = await redis().get<StoredExcuse[]>(keyFor(situation, tone));
   return Array.isArray(value) ? value : [];
 }
-
 async function writeAll(
   situation: string,
   tone: Tone,
@@ -46,8 +46,21 @@ async function writeAll(
   await redis().set(keyFor(situation, tone), items);
 }
 
-// Append newly generated excuses; returns the created records (with ids) so the
-// caller can hand ids back to the client for later flagging.
+async function readRecent(situation: string, tone: Tone): Promise<string[]> {
+  const value = await redis().get<string[]>(recentKeyFor(situation, tone));
+  return Array.isArray(value) ? value : [];
+}
+async function pushRecent(
+  situation: string,
+  tone: Tone,
+  ids: string[],
+  known?: string[],
+): Promise<void> {
+  const recent = known ?? (await readRecent(situation, tone));
+  const next = [...recent, ...ids].slice(-RECENT_CAP);
+  await redis().set(recentKeyFor(situation, tone), next);
+}
+
 export async function seedExcuses(
   situation: string,
   tone: Tone,
@@ -65,8 +78,6 @@ export async function seedExcuses(
   return created;
 }
 
-// Bump copy count and promote to quality for one excuse by id.
-// Returns false if the id wasn't found for that pair.
 export async function flagExcuse(
   situation: string,
   tone: Tone,
@@ -88,9 +99,13 @@ function shuffle<T>(arr: T[]): T[] {
   }
   return a;
 }
+function tierShuffle(items: StoredExcuse[]): StoredExcuse[] {
+  return [
+    ...shuffle(items.filter((e) => e.quality)),
+    ...shuffle(items.filter((e) => !e.quality)),
+  ];
+}
 
-// Pick up to n saved excuses for the pair, preferring quality-flagged ones,
-// filling the rest with random non-flagged. Returns [] if nothing is stored.
 export async function pickFallback(
   situation: string,
   tone: Tone,
@@ -99,7 +114,30 @@ export async function pickFallback(
   const all = await readAll(situation, tone);
   if (all.length === 0) return [];
 
-  const quality = shuffle(all.filter((e) => e.quality));
-  const rest = shuffle(all.filter((e) => !e.quality));
-  return [...quality, ...rest].slice(0, n);
+  const recent = await readRecent(situation, tone);
+
+  if (all.length <= n) {
+    const picked = tierShuffle(all).slice(0, n);
+    await pushRecent(situation, tone, picked.map((e) => e.id), recent);
+    return picked;
+  }
+
+  const window = Math.floor(all.length / 10);
+  const blocked = new Set(window > 0 ? recent.slice(-window) : []);
+
+  const eligible = all.filter((e) => !blocked.has(e.id));
+  let pool = tierShuffle(eligible);
+
+  if (pool.length < n) {
+    const pos = new Map<string, number>();
+    recent.forEach((id, i) => pos.set(id, i));
+    const topup = all
+      .filter((e) => blocked.has(e.id))
+      .sort((a, b) => (pos.get(a.id) ?? -1) - (pos.get(b.id) ?? -1));
+    pool = [...pool, ...topup];
+  }
+
+  const picked = pool.slice(0, n);
+  await pushRecent(situation, tone, picked.map((e) => e.id), recent);
+  return picked;
 }
