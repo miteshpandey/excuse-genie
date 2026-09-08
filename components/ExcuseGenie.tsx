@@ -1,20 +1,29 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { SITUATIONS, TONES, type Tone, type Excuse } from "@/lib/excuses";
+import { SITUATIONS, TONES, type Tone } from "@/lib/excuses";
 
 type CopyState = "copied" | "failed" | undefined;
+
+// Result shape from /api/generate. id is present for store-backed excuses and
+// null for last-resort base templates (which can't be flagged).
+interface ResultExcuse {
+  id: string | null;
+  label: string;
+  text: string;
+}
 
 export default function ExcuseGenie() {
   const [selectedChip, setSelectedChip] = useState<string | null>(null);
   const [typedText, setTypedText] = useState("");
   const [loading, setLoading] = useState(false);
   const [selectedTone, setSelectedTone] = useState<Tone | null>(null);
-  const [excuses, setExcuses] = useState<Excuse[]>([]);
+  const [excuses, setExcuses] = useState<ResultExcuse[]>([]);
   const [resultLabel, setResultLabel] = useState("");
   const lastKey = useRef<string>("");
   const [copyStates, setCopyStates] = useState<Record<number, CopyState>>({});
 
+  const currentPair = useRef<{ situation: string; tone: Tone } | null>(null);
   const typeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestId = useRef(0);
 
@@ -24,8 +33,10 @@ export default function ExcuseGenie() {
     force = false,
   ) {
     if (!situation || !tone) {
-      setExcuses([]);
-      setResultLabel("");
+      currentPair.current = { situation, tone };
+      setCopyStates({});
+      setResultLabel(`${tone} \u00b7 ${situation}`);
+      setExcuses(data.excuses as ResultExcuse[]);
       setLoading(false);
       return;
     }
@@ -96,8 +107,25 @@ export default function ExcuseGenie() {
     runGenerate(s, t, true);
   }
 
-  async function copyLine(text: string, index: number) {
+    async function copyLine(text: string, id: string | null, index: number) {
+    const flag = () => {
+      const pair = currentPair.current;
+      if (!id || !pair) return; // base-template excuses have no id; nothing to flag
+      // Fire-and-forget: a flag failure must never affect the copy UX.
+      fetch("/api/flag", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          situation: pair.situation,
+          tone: pair.tone,
+          id,
+        }),
+        keepalive: true,
+      }).catch(() => {});
+    };
+
     const finish = (state: CopyState) => {
+      if (state === "copied") flag();
       setCopyStates((prev) => ({ ...prev, [index]: state }));
       setTimeout(() => {
         setCopyStates((prev) => ({ ...prev, [index]: undefined }));
@@ -287,7 +315,7 @@ export default function ExcuseGenie() {
                     </div>
                     <button
                       aria-label="Copy excuse"
-                      onClick={() => copyLine(ex.text, i)}
+                      onClick={() => copyLine(ex.text, ex.id, i)}
                       className={
                         "mt-[22px] shrink-0 p-1 leading-none transition-colors " +
                         copyColor
