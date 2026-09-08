@@ -79,6 +79,8 @@ export async function POST(req: Request) {
       model: google(MODEL),
       schema,
       temperature: 0.9,
+      abortSignal: AbortSignal.timeout(18000),
+      maxRetries: 1,
       providerOptions: {
         google: {
           // Gemini 3.x Flash cannot fully disable thinking; "low" keeps
