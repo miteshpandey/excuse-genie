@@ -1,20 +1,18 @@
 import { NextResponse } from "next/server";
 import { google } from "@ai-sdk/google";
 import { generateObject, jsonSchema } from "ai";
-import {
-  generateExcuses,
-  isTone,
-  type Tone,
-  type Excuse,
-} from "@/lib/excuses";
+import { generateExcuses, isTone, type Tone } from "@/lib/excuses";
+import { seedExcuses, pickFallback, type StoredExcuse } from "@/lib/store";
 
-// Give the model call room to finish on the serverless function.
 export const maxDuration = 30;
 
-// The model string is the one thing you may want to change later. Any current
-// free Gemini Flash model works (e.g. "gemini-2.5-flash-lite" for lower latency,
-// or a newer flash id once you confirm it in Google AI Studio).
 const MODEL = "gemini-3.5-flash-lite";
+
+interface OutExcuse {
+  id: string | null;
+  label: string;
+  text: string;
+}
 
 const TONE_GUIDE: Record<Tone, string> = {
   sincere: "earnest and self-aware, owning up to a real but relatable failing",
@@ -45,8 +43,7 @@ const schema = jsonSchema<{ excuses: { label: string; text: string }[] }>({
           },
           text: {
             type: "string",
-            description:
-              "The excuse itself, first person, one or two sentences",
+            description: "The excuse itself, first person, one or two sentences",
           },
         },
       },
@@ -81,13 +78,6 @@ export async function POST(req: Request) {
       temperature: 0.9,
       abortSignal: AbortSignal.timeout(18000),
       maxRetries: 0,
-      providerOptions: {
-        google: {
-          // Gemini 3.x Flash cannot fully disable thinking; "low" keeps
-          // latency down for a task this small. (2.5 models use thinkingBudget.)
-          // thinkingConfig: { thinkingLevel: "low" },
-        },
-      },
       system:
         "You write short, believable, entertaining excuses for everyday social and work situations. " +
         "Given a situation and a tone, return exactly three distinct excuses. " +
@@ -99,16 +89,43 @@ export async function POST(req: Request) {
         `Write three excuses in this tone.`,
     });
 
-    const excuses: Excuse[] = object.excuses
+    const items = object.excuses
       .slice(0, 3)
       .map((e) => ({ label: e.label, text: e.text }));
 
-    return NextResponse.json({ situation, tone, excuses });
+    let excuses: OutExcuse[];
+    try {
+      const seeded: StoredExcuse[] = await seedExcuses(situation, tone, items);
+      excuses = seeded.map((s) => ({ id: s.id, label: s.label, text: s.text }));
+    } catch (e) {
+      console.error("generate: seed failed, returning unseeded live output", e);
+      excuses = items.map((it) => ({ id: null, label: it.label, text: it.text }));
+    }
+
+    return NextResponse.json({ situation, tone, excuses, source: "live" });
   } catch (err) {
-    // Model unavailable (no key set, rate limited, or provider outage):
-    // fall back to the local bank so the app always returns something.
-    console.error("generate: model call failed, falling back to local bank", err);
-    const excuses = generateExcuses(situation, tone);
-    return NextResponse.json({ situation, tone, excuses });
+    console.error("generate: model call failed", err);
+
+    try {
+      const picks = await pickFallback(situation, tone, 3);
+      if (picks.length > 0) {
+        const excuses: OutExcuse[] = picks.map((s) => ({
+          id: s.id,
+          label: s.label,
+          text: s.text,
+        }));
+        return NextResponse.json({ situation, tone, excuses, source: "store" });
+      }
+    } catch (e) {
+      console.error("generate: store fallback failed", e);
+    }
+
+    const base = generateExcuses(situation, tone);
+    const excuses: OutExcuse[] = base.map((b) => ({
+      id: null,
+      label: b.label,
+      text: b.text,
+    }));
+    return NextResponse.json({ situation, tone, excuses, source: "template" });
   }
 }
